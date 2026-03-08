@@ -1,0 +1,10 @@
+{
+  "name": "audiobit-relay-deploy",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Root deploy wrapper for AudioBit relay",
+  "scripts": {
+    "postinstall": "npm --prefix relay install --omit=dev",
+    "start": "npm --prefix relay start"
+  }
+}
