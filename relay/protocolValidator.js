@@ -10,6 +10,7 @@ const SUPPORTED_TYPES = new Set([
   'devices',
   'cmd',
   'cmd_result',
+  'remove_device',
   'ping',
   'pong',
   'resync',
@@ -17,7 +18,7 @@ const SUPPORTED_TYPES = new Set([
 ]);
 
 const ROLE_ALLOWED_TYPES = Object.freeze({
-  pc: new Set(['state', 'lvl', 'devices', 'cmd_result', 'session_status', 'ping', 'pong']),
+  pc: new Set(['state', 'lvl', 'devices', 'cmd_result', 'session_status', 'remove_device', 'ping', 'pong']),
   remote: new Set(['cmd', 'resync', 'ping', 'pong'])
 });
 
@@ -70,6 +71,31 @@ function createProtocolValidator({ maxMessageBytes }) {
       }
       if (typeof message.pair_code !== 'string' || !/^\d{6}$/.test(message.pair_code)) {
         return fail('invalid_pair_code', 'hello_remote requires a 6-digit pair_code.');
+      }
+
+      if ('device_id' in message && (typeof message.device_id !== 'string' || !message.device_id.trim())) {
+        return fail('invalid_device_id', 'device_id must be a non-empty string when provided.');
+      }
+      if ('device_name' in message && (typeof message.device_name !== 'string' || !message.device_name.trim())) {
+        return fail('invalid_device_name', 'device_name must be a non-empty string when provided.');
+      }
+      if ('device_location' in message && (typeof message.device_location !== 'string' || !message.device_location.trim())) {
+        return fail('invalid_device_location', 'device_location must be a non-empty string when provided.');
+      }
+      if ('connection_type' in message && (typeof message.connection_type !== 'string' || !message.connection_type.trim())) {
+        return fail('invalid_connection_type', 'connection_type must be a non-empty string when provided.');
+      }
+    }
+
+    if (message.t === 'remove_device') {
+      if ('device_id' in message && (typeof message.device_id !== 'string' || !message.device_id.trim())) {
+        return fail('invalid_device_id', 'remove_device.device_id must be a non-empty string when provided.');
+      }
+    }
+
+    if ((message.t === 'ping' || message.t === 'pong') && 'ts' in message) {
+      if (typeof message.ts !== 'number' || !Number.isFinite(message.ts)) {
+        return fail('invalid_timestamp', 'ts must be a finite number when provided.');
       }
     }
 

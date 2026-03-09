@@ -119,8 +119,8 @@ const wss = new WebSocket.Server({
   }
 });
 
-wss.on('connection', (ws) => {
-  messageRouter.bindSocket(ws);
+wss.on('connection', (ws, req) => {
+  messageRouter.bindSocket(ws, req);
 });
 
 server.on('upgrade', (req, socket, head) => {

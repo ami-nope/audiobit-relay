@@ -2,11 +2,23 @@
 
 const { closeWs, isWsOpen } = require('./utils');
 
+function sanitizeDeviceValue(value, maxLength = 160) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return '';
+  }
+  return trimmed.slice(0, maxLength);
+}
+
 class SessionManager {
   constructor({ sessionTtlMs }) {
     this.sessionTtlMs = sessionTtlMs;
     this.sessions = new Map();
     this.socketMeta = new WeakMap();
+    this.remoteDeviceIndex = new Map();
   }
 
   createSession({ sid, pairCode, createdAt, expiresAt }) {
@@ -49,6 +61,28 @@ class SessionManager {
     return !session.pc_conn && session.expires_at <= Date.now();
   }
 
+  pruneStaleRemotes(session) {
+    const staleSockets = [];
+    for (const remoteWs of session.remote_conns) {
+      if (isWsOpen(remoteWs)) {
+        continue;
+      }
+      staleSockets.push(remoteWs);
+    }
+
+    for (const staleWs of staleSockets) {
+      const staleMeta = this.getSocketMeta(staleWs);
+      if (staleMeta && staleMeta.role === 'remote' && staleMeta.device_id) {
+        const deviceRef = this.remoteDeviceIndex.get(staleMeta.device_id);
+        if (deviceRef && deviceRef.ws === staleWs) {
+          this.remoteDeviceIndex.delete(staleMeta.device_id);
+        }
+      }
+      session.remote_conns.delete(staleWs);
+      this.socketMeta.delete(staleWs);
+    }
+  }
+
   registerPc(sid, ws) {
     const session = this.getSession(sid);
     if (!session) {
@@ -73,7 +107,7 @@ class SessionManager {
     return { ok: true, session };
   }
 
-  registerRemote(sid, pairCode, ws) {
+  registerRemote(sid, pairCode, ws, remoteIdentity = {}) {
     const session = this.getSession(sid);
     if (!session) {
       return { ok: false, code: 'session_not_found', message: 'Session does not exist.' };
@@ -87,9 +121,52 @@ class SessionManager {
       return { ok: false, code: 'pair_code_invalid', message: 'Pairing code is invalid.' };
     }
 
+    this.pruneStaleRemotes(session);
+    if (session.remote_conns.size > 0 && !session.remote_conns.has(ws)) {
+      return {
+        ok: false,
+        code: 'device_already_connected',
+        message: 'A device is already connected to this session.'
+      };
+    }
+
+    const generatedDeviceId = `remote_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+    const deviceId = sanitizeDeviceValue(remoteIdentity.device_id, 128) || generatedDeviceId;
+    const indexedDevice = this.remoteDeviceIndex.get(deviceId);
+    if (indexedDevice && indexedDevice.ws !== ws) {
+      if (!isWsOpen(indexedDevice.ws)) {
+        this.remoteDeviceIndex.delete(deviceId);
+      } else if (indexedDevice.sid !== sid) {
+        return {
+          ok: false,
+          code: 'device_bound_to_other_session',
+          message: 'This device is already connected to another session.'
+        };
+      } else {
+        return {
+          ok: false,
+          code: 'device_already_connected',
+          message: 'This device is already connected to this session.'
+        };
+      }
+    }
+
+    const remoteMeta = {
+      sid,
+      role: 'remote',
+      device_id: deviceId,
+      device_name: sanitizeDeviceValue(remoteIdentity.device_name, 128) || 'Unknown device',
+      device_location: sanitizeDeviceValue(remoteIdentity.device_location, 128) || null,
+      connection_type: sanitizeDeviceValue(remoteIdentity.connection_type, 64) || 'websocket',
+      ip: sanitizeDeviceValue(remoteIdentity.ip, 128) || null,
+      user_agent: sanitizeDeviceValue(remoteIdentity.user_agent, 256) || null,
+      connected_at: Date.now()
+    };
+
     session.remote_conns.add(ws);
-    this.socketMeta.set(ws, { sid, role: 'remote' });
-    return { ok: true, session };
+    this.socketMeta.set(ws, remoteMeta);
+    this.remoteDeviceIndex.set(deviceId, { sid, ws });
+    return { ok: true, session, remoteMeta };
   }
 
   getSocketMeta(ws) {
@@ -140,6 +217,12 @@ class SessionManager {
       }
     } else if (meta.role === 'remote') {
       session.remote_conns.delete(ws);
+      if (meta.device_id) {
+        const deviceRef = this.remoteDeviceIndex.get(meta.device_id);
+        if (deviceRef && deviceRef.ws === ws) {
+          this.remoteDeviceIndex.delete(meta.device_id);
+        }
+      }
     }
 
     if (!session.pc_conn && session.remote_conns.size === 0 && session.expires_at <= Date.now()) {
@@ -147,6 +230,59 @@ class SessionManager {
     }
 
     return { ...meta, session };
+  }
+
+  findRemoteSocket(sid, deviceId) {
+    const session = this.getSession(sid);
+    if (!session) {
+      return null;
+    }
+
+    this.pruneStaleRemotes(session);
+    if (deviceId) {
+      const wantedId = sanitizeDeviceValue(deviceId, 128);
+      for (const remoteWs of session.remote_conns) {
+        const meta = this.getSocketMeta(remoteWs);
+        if (meta && meta.role === 'remote' && meta.device_id === wantedId) {
+          return remoteWs;
+        }
+      }
+      return null;
+    }
+
+    for (const remoteWs of session.remote_conns) {
+      return remoteWs;
+    }
+    return null;
+  }
+
+  terminateSession(sid, { remoteCloseCode = 4002, remoteCloseReason = 'session_terminated' } = {}) {
+    const session = this.getSession(sid);
+    if (!session) {
+      return null;
+    }
+
+    if (session.pc_conn) {
+      this.socketMeta.delete(session.pc_conn);
+      session.pc_conn = null;
+    }
+
+    for (const remoteWs of session.remote_conns) {
+      const meta = this.getSocketMeta(remoteWs);
+      if (meta && meta.role === 'remote' && meta.device_id) {
+        const deviceRef = this.remoteDeviceIndex.get(meta.device_id);
+        if (deviceRef && deviceRef.ws === remoteWs) {
+          this.remoteDeviceIndex.delete(meta.device_id);
+        }
+      }
+
+      this.socketMeta.delete(remoteWs);
+      closeWs(remoteWs, remoteCloseCode, remoteCloseReason);
+    }
+
+    session.remote_conns.clear();
+    this.sessions.delete(sid);
+    return session;
   }
 
   cleanupExpiredSessions() {
@@ -157,6 +293,13 @@ class SessionManager {
       }
 
       for (const remoteWs of session.remote_conns) {
+        const remoteMeta = this.getSocketMeta(remoteWs);
+        if (remoteMeta && remoteMeta.role === 'remote' && remoteMeta.device_id) {
+          const deviceRef = this.remoteDeviceIndex.get(remoteMeta.device_id);
+          if (deviceRef && deviceRef.ws === remoteWs) {
+            this.remoteDeviceIndex.delete(remoteMeta.device_id);
+          }
+        }
         this.socketMeta.delete(remoteWs);
         closeWs(remoteWs, 4001, 'session_expired');
       }
