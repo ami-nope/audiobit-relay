@@ -8,6 +8,8 @@ Current change (most recent)
 - Protocol documentation updated to reflect multi-device behavior.
 - Client-provided `sid` always takes precedence over server-generated values; if provided and valid, the server uses it and does not generate a new `sid`.
 - Added `/count` live dashboard with a black-white-grey silver UI, rounded 70px corners, and click-to-view session logs.
+- Device latency now also uses WebSocket heartbeat pong timing to report `device_latency` when app-level `pong` is missing.
+- Fixed `/count` table clipping by adding inner padding and a rounded inner table shell.
 
 Summary
 This update lets clients provide their own session identifiers and pairing codes when calling `POST /create-session`. If the client does not provide them, the server continues to generate values exactly as before.

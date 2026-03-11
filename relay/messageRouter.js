@@ -167,6 +167,34 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
     }
   }
 
+  function handleHeartbeatPong(ws) {
+    const meta = sessionManager.getSocketMeta(ws);
+    if (!meta || meta.role !== 'remote') {
+      return;
+    }
+
+    const session = sessionManager.getSession(meta.sid);
+    if (!session || !isWsOpen(session.pc_conn)) {
+      return;
+    }
+
+    const lastPingAt = ws._lastHeartbeatPingAt;
+    if (!Number.isFinite(lastPingAt)) {
+      return;
+    }
+
+    const now = Date.now();
+    const latencyMs = Math.max(0, now - lastPingAt);
+    sendWsJson(
+      session.pc_conn,
+      buildDevicePayload('device_latency', meta.sid, meta, {
+        ts: lastPingAt,
+        rtt_ms: latencyMs,
+        measured_at: now
+      })
+    );
+  }
+
   function sendProtocolError(ws, code, message) {
     sendWsJson(ws, {
       t: 'err',
@@ -483,6 +511,7 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
 
     ws.on('pong', () => {
       ws.isAlive = true;
+      handleHeartbeatPong(ws);
     });
 
     ws.on('message', (data, isBinary) => {

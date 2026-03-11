@@ -209,6 +209,13 @@ function renderCountPage() {
       border: 1px solid var(--border);
       background: rgba(12, 13, 17, 0.92);
       overflow: hidden;
+      padding: 14px;
+    }
+    .table-inner {
+      border-radius: calc(var(--radius) - 20px);
+      overflow: hidden;
+      background: rgba(12, 13, 17, 0.98);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
     }
     table {
       width: 100%;
@@ -376,19 +383,21 @@ function renderCountPage() {
       </div>
     </header>
     <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Session</th>
-            <th>Role</th>
-            <th>Device</th>
-            <th>Connected For</th>
-            <th>Connected At</th>
-            <th>IP</th>
-          </tr>
-        </thead>
-        <tbody id="connection-rows"></tbody>
-      </table>
+      <div class="table-inner">
+        <table>
+          <thead>
+            <tr>
+              <th>Session</th>
+              <th>Role</th>
+              <th>Device</th>
+              <th>Connected For</th>
+              <th>Connected At</th>
+              <th>IP</th>
+            </tr>
+          </thead>
+          <tbody id="connection-rows"></tbody>
+        </table>
+      </div>
     </div>
     <div class="footer" id="last-updated">Last updated: --</div>
   </div>
@@ -701,6 +710,7 @@ const heartbeat = setInterval(() => {
 
     ws.isAlive = false;
     try {
+      ws._lastHeartbeatPingAt = Date.now();
       ws.ping();
     } catch (_) {
       ws.terminate();
