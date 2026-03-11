@@ -74,6 +74,86 @@ Optional request body:
 }
 ```
 
+### `GET /count`
+
+Returns an HTML dashboard showing live connections.
+
+### `GET /count/data`
+
+Returns live connection data in JSON.
+
+**Response 200**
+
+```json
+{
+  "now": 1741500000000,
+  "totals": {
+    "sessions": 2,
+    "pc_connections": 1,
+    "remote_connections": 3,
+    "total_connections": 4
+  },
+  "sessions": [
+    {
+      "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+      "created_at": 1741500000000,
+      "expires_at": 1741500300000,
+      "pc": {
+        "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+        "role": "pc",
+        "device_name": "PC",
+        "connection_type": "websocket",
+        "ip": "203.0.113.5",
+        "user_agent": "Mozilla/5.0 ...",
+        "connected_at": 1741500000100
+      },
+      "remotes": [
+        {
+          "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+          "role": "remote",
+          "device_id": "my-device-1",
+          "device_name": "John Phone",
+          "device_location": "New York, USA",
+          "connection_type": "wifi",
+          "ip": "203.0.113.9",
+          "user_agent": "Mozilla/5.0 ...",
+          "connected_at": 1741500000200
+        }
+      ]
+    }
+  ]
+}
+```
+
+### `GET /count/logs?sid=...`
+
+Returns recent session logs for the provided `sid`.
+
+**Response 200**
+
+```json
+{
+  "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+  "logs": [
+    {
+      "id": "evt_abc123",
+      "ts": 1741500000200,
+      "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+      "type": "remote_connected",
+      "role": "remote",
+      "device_id": "my-device-1",
+      "device_name": "John Phone",
+      "message": null,
+      "detail": {
+        "connection_type": "wifi",
+        "ip": "203.0.113.9",
+        "user_agent": "Mozilla/5.0 ..."
+      }
+    }
+  ]
+}
+```
+
 ### `GET /connect?sid=...&code=...`
 
 Returns query values in JSON.

@@ -7,6 +7,7 @@ Current change (most recent)
 - When a remote connects and other devices are already connected, the PC now receives `existing_device_count` and `connected_device_count` in `device_connected`.
 - Protocol documentation updated to reflect multi-device behavior.
 - Client-provided `sid` always takes precedence over server-generated values; if provided and valid, the server uses it and does not generate a new `sid`.
+- Added `/count` live dashboard with a black-white-grey silver UI, rounded 70px corners, and click-to-view session logs.
 
 Summary
 This update lets clients provide their own session identifiers and pairing codes when calling `POST /create-session`. If the client does not provide them, the server continues to generate values exactly as before.
@@ -272,4 +273,40 @@ Behavior notes
 Files touched (multi-device update)
 - `relay/sessionManager.js`
 - `relay/messageRouter.js`
+- `docs/PROTOCOL.md`
+
+---
+
+Count Dashboard Update (2026-03-12)
+
+Summary
+Added a new `/count` live dashboard that shows active connections and connection durations in a table. Clicking any row loads recent logs for that session.
+
+What changed
+- `relay/server.js`: added `/count`, `/count/data`, and `/count/logs` endpoints plus a live HTML dashboard UI.
+- `relay/activityLog.js`: new in-memory log buffer to store recent session events.
+- `relay/messageRouter.js`: records connect/disconnect/remove events into the activity log.
+- `relay/sessionManager.js`: PC metadata now includes `connected_at` and connection info for display.
+- `docs/PROTOCOL.md`: documented the new `/count` endpoints.
+
+UI notes
+- Theme: black, white, grey, silver.
+- Rounded corners: 70px on main panels.
+- Auto-refresh: every 2.5 seconds.
+
+Example: fetch live snapshot
+```http
+GET /count/data HTTP/1.1
+```
+
+Example: fetch logs for a session
+```http
+GET /count/logs?sid=a1b2c3d4e5f6a1b2c3d4e5f6 HTTP/1.1
+```
+
+Files touched (count dashboard)
+- `relay/server.js`
+- `relay/activityLog.js`
+- `relay/messageRouter.js`
+- `relay/sessionManager.js`
 - `docs/PROTOCOL.md`

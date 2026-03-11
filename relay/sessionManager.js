@@ -83,7 +83,7 @@ class SessionManager {
     }
   }
 
-  registerPc(sid, ws) {
+  registerPc(sid, ws, pcIdentity = {}) {
     const session = this.getSession(sid);
     if (!session) {
       return { ok: false, code: 'session_not_found', message: 'Session does not exist.' };
@@ -103,7 +103,15 @@ class SessionManager {
 
     session.pc_conn = ws;
     session.expires_at = Number.MAX_SAFE_INTEGER;
-    this.socketMeta.set(ws, { sid, role: 'pc' });
+    this.socketMeta.set(ws, {
+      sid,
+      role: 'pc',
+      device_name: sanitizeDeviceValue(pcIdentity.device_name, 128) || 'PC',
+      connection_type: sanitizeDeviceValue(pcIdentity.connection_type, 64) || 'websocket',
+      ip: sanitizeDeviceValue(pcIdentity.ip, 128) || null,
+      user_agent: sanitizeDeviceValue(pcIdentity.user_agent, 256) || null,
+      connected_at: Date.now()
+    });
     return { ok: true, session };
   }
 
@@ -298,6 +306,55 @@ class SessionManager {
       }
       this.sessions.delete(sid);
     }
+  }
+
+  getLiveSnapshot() {
+    const sessions = [];
+    for (const [sid, session] of this.sessions.entries()) {
+      this.pruneStaleRemotes(session);
+
+      if (session.pc_conn && !isWsOpen(session.pc_conn)) {
+        session.pc_conn = null;
+      }
+
+      const pcMeta = session.pc_conn ? this.getSocketMeta(session.pc_conn) : null;
+      const remotes = [];
+      for (const remoteWs of session.remote_conns) {
+        const meta = this.getSocketMeta(remoteWs);
+        if (meta && meta.role === 'remote' && isWsOpen(remoteWs)) {
+          remotes.push({
+            sid: meta.sid,
+            role: meta.role,
+            device_id: meta.device_id || null,
+            device_name: meta.device_name || null,
+            device_location: meta.device_location || null,
+            connection_type: meta.connection_type || 'websocket',
+            ip: meta.ip || null,
+            user_agent: meta.user_agent || null,
+            connected_at: meta.connected_at || null
+          });
+        }
+      }
+
+      sessions.push({
+        sid,
+        created_at: session.created_at,
+        expires_at: session.expires_at,
+        pc: pcMeta
+          ? {
+              sid: pcMeta.sid,
+              role: pcMeta.role,
+              device_name: pcMeta.device_name || 'PC',
+              connection_type: pcMeta.connection_type || 'websocket',
+              ip: pcMeta.ip || null,
+              user_agent: pcMeta.user_agent || null,
+              connected_at: pcMeta.connected_at || null
+            }
+          : null,
+        remotes
+      });
+    }
+    return sessions;
   }
 }
 

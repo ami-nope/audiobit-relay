@@ -17,7 +17,7 @@ function sanitizeString(value, maxLength = 160) {
   return trimmed.slice(0, maxLength);
 }
 
-function createMessageRouter({ sessionManager, validator }) {
+function createMessageRouter({ sessionManager, validator, activityLog }) {
   const remoteProbeTimers = new WeakMap();
   const remoteProbeState = new WeakMap();
 
@@ -65,6 +65,23 @@ function createMessageRouter({ sessionManager, validator }) {
       ip: connectionInfo.ip || null,
       user_agent: connectionInfo.user_agent || null
     };
+  }
+
+  function buildPcIdentity(ws, message) {
+    const connectionInfo = ws.connection_info || {};
+    return {
+      device_name: sanitizeString(message.device_name || message.name, 128) || 'PC',
+      connection_type: connectionInfo.connection_type || 'websocket',
+      ip: connectionInfo.ip || null,
+      user_agent: connectionInfo.user_agent || null
+    };
+  }
+
+  function recordActivity(event) {
+    if (!activityLog || typeof activityLog.record !== 'function') {
+      return;
+    }
+    activityLog.record(event);
   }
 
   function buildDevicePayload(messageType, sid, remoteMeta, extra = {}) {
@@ -175,7 +192,8 @@ function createMessageRouter({ sessionManager, validator }) {
   }
 
   function handleHelloPc(ws, message) {
-    const result = sessionManager.registerPc(message.sid, ws);
+    const pcIdentity = buildPcIdentity(ws, message);
+    const result = sessionManager.registerPc(message.sid, ws, pcIdentity);
     if (!result.ok) {
       sendProtocolError(ws, result.code, result.message);
       closeWs(ws, POLICY_VIOLATION_CLOSE, result.message);
@@ -199,6 +217,18 @@ function createMessageRouter({ sessionManager, validator }) {
 
       sendWsJson(ws, buildDevicePayload('device_connected', message.sid, remoteMeta));
     }
+
+    recordActivity({
+      sid: message.sid,
+      type: 'pc_connected',
+      role: 'pc',
+      device_name: pcIdentity.device_name || 'PC',
+      detail: {
+        connection_type: pcIdentity.connection_type,
+        ip: pcIdentity.ip,
+        user_agent: pcIdentity.user_agent
+      }
+    });
 
     console.log(`[PC connected] sid=${message.sid}`);
   }
@@ -239,6 +269,22 @@ function createMessageRouter({ sessionManager, validator }) {
           ? { existing_device_count: existingDeviceCount, connected_device_count: connectedCount }
           : {};
       sendWsJson(session.pc_conn, buildDevicePayload('device_connected', message.sid, remoteMeta, extra));
+    }
+
+    if (remoteMeta) {
+      recordActivity({
+        sid: message.sid,
+        type: 'remote_connected',
+        role: 'remote',
+        device_id: remoteMeta.device_id || null,
+        device_name: remoteMeta.device_name || null,
+        detail: {
+          device_location: remoteMeta.device_location || null,
+          connection_type: remoteMeta.connection_type || 'websocket',
+          ip: remoteMeta.ip || null,
+          user_agent: remoteMeta.user_agent || null
+        }
+      });
     }
 
     const deviceLabel = remoteMeta && remoteMeta.device_id ? remoteMeta.device_id : 'n/a';
@@ -290,6 +336,15 @@ function createMessageRouter({ sessionManager, validator }) {
     if (isWsOpen(session.pc_conn)) {
       sendWsJson(session.pc_conn, buildDevicePayload('device_removed', sid, targetMeta, { removed_by: 'pc' }));
     }
+
+    recordActivity({
+      sid,
+      type: 'remote_removed',
+      role: 'remote',
+      device_id: targetMeta.device_id || null,
+      device_name: targetMeta.device_name || null,
+      detail: { removed_by: 'pc' }
+    });
 
     console.log(`[device removed] sid=${sid} device_id=${targetMeta.device_id}`);
   }
@@ -386,8 +441,17 @@ function createMessageRouter({ sessionManager, validator }) {
       return;
     }
 
-    if (detached.role === 'remote' && detached.session && isWsOpen(detached.session.pc_conn)) {
-      sendWsJson(detached.session.pc_conn, buildDevicePayload('device_disconnected', detached.sid, detached));
+    if (detached.role === 'remote' && detached.session) {
+      if (isWsOpen(detached.session.pc_conn)) {
+        sendWsJson(detached.session.pc_conn, buildDevicePayload('device_disconnected', detached.sid, detached));
+      }
+      recordActivity({
+        sid: detached.sid,
+        type: 'remote_disconnected',
+        role: 'remote',
+        device_id: detached.device_id || null,
+        device_name: detached.device_name || null
+      });
       return;
     }
 
@@ -403,6 +467,12 @@ function createMessageRouter({ sessionManager, validator }) {
     sessionManager.terminateSession(detached.sid, {
       remoteCloseCode: 4002,
       remoteCloseReason: 'pc_disconnected'
+    });
+    recordActivity({
+      sid: detached.sid,
+      type: 'pc_disconnected',
+      role: 'pc',
+      device_name: detached.device_name || 'PC'
     });
     console.log(`[session removed] sid=${detached.sid} reason=pc_disconnected`);
   }
