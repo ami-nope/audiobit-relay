@@ -122,13 +122,6 @@ class SessionManager {
     }
 
     this.pruneStaleRemotes(session);
-    if (session.remote_conns.size > 0 && !session.remote_conns.has(ws)) {
-      return {
-        ok: false,
-        code: 'device_already_connected',
-        message: 'A device is already connected to this session.'
-      };
-    }
 
     const generatedDeviceId = `remote_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     const deviceId = sanitizeDeviceValue(remoteIdentity.device_id, 128) || generatedDeviceId;

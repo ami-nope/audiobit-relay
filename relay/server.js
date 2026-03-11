@@ -15,12 +15,40 @@ const sessionManager = new SessionManager({ sessionTtlMs: config.SESSION_TTL_MS 
 const validator = createProtocolValidator({ maxMessageBytes: config.MAX_MESSAGE_BYTES });
 const messageRouter = createMessageRouter({ sessionManager, validator });
 
+function normalizeSidInput(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  return '';
+}
+
+function normalizePairCodeInput(value) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(Math.trunc(value)).padStart(6, '0');
+  }
+  return '';
+}
+
 function handleCreateSession(req, res) {
   parseJsonBody(req, config.MAX_MESSAGE_BYTES)
-    .then(() => {
+    .then((body) => {
+      const payload = body && typeof body === 'object' ? body : {};
+      const requestedSid = normalizeSidInput(payload.sid);
+      const requestedPairCode = normalizePairCodeInput(
+        payload.pair_code !== undefined ? payload.pair_code : payload.code
+      );
+
       const pairing = createSessionPairing(sessionManager, {
         sessionTtlMs: config.SESSION_TTL_MS,
-        qrBaseUrl: config.QR_BASE_URL
+        qrBaseUrl: config.QR_BASE_URL,
+        requestedSid,
+        requestedPairCode
       });
 
       sessionManager.createSession({

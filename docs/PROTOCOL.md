@@ -13,7 +13,7 @@
 
 - Transport: WebSocket text frames only. Binary frames are rejected.
 - Messages are JSON objects with required string field `t`.
-- Session IDs are 24-char hex strings.
+- Session IDs are 24-char hex strings by default. If the client supplies a `sid` in `POST /create-session`, it must be exactly 10 alphanumeric characters.
 - Pair codes are 6-digit strings (`/^\d{6}$/`).
 
 ---
@@ -40,7 +40,7 @@ Service discovery.
 
 ### `POST /create-session`
 
-Creates a new session with a unique pair code and session ID.
+Creates a new session with a unique pair code and session ID. Clients may optionally supply a `sid` and `pair_code` (or `code`) in the JSON body. If a valid `sid` is provided, the relay always uses it and does not generate a different `sid`.
 
 **Response 201**
 
@@ -50,6 +50,15 @@ Creates a new session with a unique pair code and session ID.
   "pair_code": "482901",
   "expires": 1741500300000,
   "qr_url": "https://remote.audiobit.app/connect?sid=a1b2c3d4e5f6a1b2c3d4e5f6&code=482901"
+}
+```
+
+Optional request body:
+
+```json
+{
+  "sid": "aB3dE9kLmQ",
+  "pair_code": "483920"
 }
 ```
 
@@ -298,6 +307,19 @@ Common payload fields:
 }
 ```
 
+When a remote connects and another device is already connected to the same session, the relay includes counts:
+
+```json
+{
+  "t": "device_connected",
+  "sid": "a1b2c3d4e5f6a1b2c3d4e5f6",
+  "device_id": "my-device-2",
+  "device_name": "Jane Tablet",
+  "existing_device_count": 1,
+  "connected_device_count": 2
+}
+```
+
 `device_disconnected` example:
 
 ```json
@@ -388,7 +410,6 @@ WS-level heartbeat:
 | `session_expired` | Session expired before PC connected |
 | `pc_already_connected` | A different PC is already attached |
 | `pair_code_invalid` | Pair code mismatch |
-| `device_already_connected` | A device is already connected to this session |
 | `device_bound_to_other_session` | Same device id active in another session |
 | `device_not_found` | `remove_device` target not found |
 | `not_authenticated` | Message before hello |
@@ -401,7 +422,6 @@ Fatal handshake errors (relay sends `err`, then closes with `1008`):
 - `session_expired`
 - `pc_already_connected`
 - `pair_code_invalid`
-- `device_already_connected`
 - `device_bound_to_other_session`
 
 ---
@@ -411,7 +431,7 @@ Fatal handshake errors (relay sends `err`, then closes with `1008`):
 1. PC creates session via `POST /create-session`.
 2. PC connects to WS and sends `hello_pc`.
 3. Remote connects and sends `hello_remote` with `sid` + `pair_code` (+ optional device metadata).
-4. Relay allows only one active remote per session.
+4. Relay allows multiple active remotes per session.
 5. Relay forwards remote `cmd` to PC; PC replies with `cmd_result`.
 6. Relay forwards PC `state`/`lvl`/`devices` to remote (`state` is cached).
 7. Relay sends remote device events to PC (`device_connected`, `device_disconnected`, `device_removed`).
@@ -437,7 +457,6 @@ Fatal handshake errors (relay sends `err`, then closes with `1008`):
 | Authentication | Non-hello non-ping/pong messages require prior successful hello |
 | Role enforcement | Only role-allowed `t` values accepted |
 | Single PC | One PC socket per session |
-| Single remote | One remote socket per session |
 | Device lock | Same `device_id` cannot be active in multiple sessions |
 | Pair code match | Must match session pair code |
 

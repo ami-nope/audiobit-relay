@@ -232,7 +232,13 @@ function createMessageRouter({ sessionManager, validator }) {
     startRemoteLatencyProbe(ws);
 
     if (isWsOpen(session.pc_conn) && remoteMeta) {
-      sendWsJson(session.pc_conn, buildDevicePayload('device_connected', message.sid, remoteMeta));
+      const connectedCount = session.remote_conns.size;
+      const existingDeviceCount = Math.max(0, connectedCount - 1);
+      const extra =
+        existingDeviceCount > 0
+          ? { existing_device_count: existingDeviceCount, connected_device_count: connectedCount }
+          : {};
+      sendWsJson(session.pc_conn, buildDevicePayload('device_connected', message.sid, remoteMeta, extra));
     }
 
     const deviceLabel = remoteMeta && remoteMeta.device_id ? remoteMeta.device_id : 'n/a';
