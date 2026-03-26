@@ -30,7 +30,8 @@ class SessionManager {
       last_state_raw: null,
       last_rev: 0,
       created_at: createdAt,
-      expires_at: expiresAt
+      expires_at: expiresAt,
+      cmd_queue: []
     };
     this.sessions.set(sid, session);
     return session;
@@ -198,6 +199,53 @@ class SessionManager {
     return session.last_state_raw;
   }
 
+  enqueueCommand(sid, ws, rawMessage) {
+    const session = this.getSession(sid);
+    if (!session) {
+      return null;
+    }
+    const entry = { ws, rawMessage, enqueuedAt: Date.now() };
+    session.cmd_queue.push(entry);
+    const position = session.cmd_queue.length;
+    return { position, shouldForwardNow: position === 1 };
+  }
+
+  dequeueCommand(sid) {
+    const session = this.getSession(sid);
+    if (!session || session.cmd_queue.length === 0) {
+      return null;
+    }
+    session.cmd_queue.shift();
+    return session.cmd_queue.length > 0 ? session.cmd_queue[0] : null;
+  }
+
+  peekCommand(sid) {
+    const session = this.getSession(sid);
+    if (!session || session.cmd_queue.length === 0) {
+      return null;
+    }
+    return session.cmd_queue[0];
+  }
+
+  getQueueLength(sid) {
+    const session = this.getSession(sid);
+    if (!session) {
+      return 0;
+    }
+    return session.cmd_queue.length;
+  }
+
+  removeCommandsBySocket(sid, ws) {
+    const session = this.getSession(sid);
+    if (!session) {
+      return { removedCount: 0, wasHead: false };
+    }
+    const wasHead = session.cmd_queue.length > 0 && session.cmd_queue[0].ws === ws;
+    const before = session.cmd_queue.length;
+    session.cmd_queue = session.cmd_queue.filter(entry => entry.ws !== ws);
+    return { removedCount: before - session.cmd_queue.length, wasHead };
+  }
+
   removeSocket(ws) {
     const meta = this.getSocketMeta(ws);
     if (!meta) {
@@ -224,6 +272,7 @@ class SessionManager {
           this.remoteDeviceIndex.delete(meta.device_id);
         }
       }
+      this.removeCommandsBySocket(meta.sid, ws);
     }
 
     if (!session.pc_conn && session.remote_conns.size === 0 && session.expires_at <= Date.now()) {
@@ -282,6 +331,7 @@ class SessionManager {
     }
 
     session.remote_conns.clear();
+    session.cmd_queue = [];
     this.sessions.delete(sid);
     return session;
   }

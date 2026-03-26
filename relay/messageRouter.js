@@ -327,8 +327,19 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
         return;
       }
 
-      session.pc_conn.send(rawMessage);
-      console.log(`[command forwarded] sid=${sid}`);
+      const enqueueResult = sessionManager.enqueueCommand(sid, ws, rawMessage);
+      if (!enqueueResult) {
+        sendProtocolError(ws, 'session_not_found', 'Session no longer exists.');
+        return;
+      }
+
+      if (enqueueResult.shouldForwardNow) {
+        session.pc_conn.send(rawMessage);
+        console.log(`[command forwarded] sid=${sid}`);
+      } else {
+        sendWsJson(ws, { t: 'cmd_queued', position: enqueueResult.position });
+        console.log(`[command queued] sid=${sid} position=${enqueueResult.position}`);
+      }
       return;
     }
 
@@ -377,6 +388,23 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
     console.log(`[device removed] sid=${sid} device_id=${targetMeta.device_id}`);
   }
 
+  function advanceQueue(sid, session) {
+    const nextEntry = sessionManager.peekCommand(sid);
+    if (!nextEntry) {
+      return;
+    }
+    if (!isWsOpen(session.pc_conn)) {
+      return;
+    }
+    if (!isWsOpen(nextEntry.ws)) {
+      sessionManager.dequeueCommand(sid);
+      advanceQueue(sid, session);
+      return;
+    }
+    session.pc_conn.send(nextEntry.rawMessage);
+    console.log(`[queued command forwarded] sid=${sid} queue_remaining=${sessionManager.getQueueLength(sid) - 1}`);
+  }
+
   function handlePcMessage(sid, session, message, rawMessage) {
     if (message.t === 'state') {
       sessionManager.cacheState(sid, message, rawMessage);
@@ -385,8 +413,20 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
       return;
     }
 
-    if (message.t === 'lvl' || message.t === 'devices' || message.t === 'cmd_result' || message.t === 'session_status') {
+    if (message.t === 'lvl' || message.t === 'devices' || message.t === 'session_status') {
       broadcastRawToRemotes(session, rawMessage);
+      return;
+    }
+
+    if (message.t === 'cmd_result') {
+      const headEntry = sessionManager.peekCommand(sid);
+      if (headEntry && isWsOpen(headEntry.ws)) {
+        headEntry.ws.send(rawMessage);
+      } else if (!headEntry) {
+        broadcastRawToRemotes(session, rawMessage);
+      }
+      sessionManager.dequeueCommand(sid);
+      advanceQueue(sid, session);
       return;
     }
 
@@ -473,6 +513,12 @@ function createMessageRouter({ sessionManager, validator, activityLog }) {
       if (isWsOpen(detached.session.pc_conn)) {
         sendWsJson(detached.session.pc_conn, buildDevicePayload('device_disconnected', detached.sid, detached));
       }
+
+      const removal = sessionManager.removeCommandsBySocket(detached.sid, ws);
+      if (removal.wasHead) {
+        advanceQueue(detached.sid, detached.session);
+      }
+
       recordActivity({
         sid: detached.sid,
         type: 'remote_disconnected',

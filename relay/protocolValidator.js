@@ -14,6 +14,7 @@ const SUPPORTED_TYPES = new Set([
   'ping',
   'pong',
   'resync',
+  'cmd_queued',
   'err'
 ]);
 
